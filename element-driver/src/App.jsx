@@ -363,21 +363,80 @@ const BLANK = {
   changeOrderContact:"", jobStatus:"Complete", driverNotes:"",
 };
 
+// ─── LOCALSTORAGE HELPERS ────────────────────────────────────
+const LS_DRAFT = "ed_draft";
+const LS_WO    = "ed_current_wo";
+const LS_DRN   = "ed_drn";
+const LS_DRIVER= "ed_driver";
+const LS_SCREEN= "ed_screen";
+
+function saveDraft(form, wo, drn, driver, screen) {
+  try {
+    // Don't save base64 photos to localStorage — too large, causes crashes
+    const safe = {
+      ...form,
+      sitePhotos: [],
+      disposalTicketPhotos: [],
+      damagePhotos: [],
+    };
+    localStorage.setItem(LS_DRAFT,  JSON.stringify(safe));
+    localStorage.setItem(LS_WO,     JSON.stringify(wo));
+    localStorage.setItem(LS_DRN,    drn||"");
+    localStorage.setItem(LS_DRIVER, driver||"");
+    localStorage.setItem(LS_SCREEN, screen||"driver");
+  } catch(e) {}
+}
+
+function clearDraft() {
+  try {
+    [LS_DRAFT,LS_WO,LS_DRN,LS_DRIVER,LS_SCREEN].forEach(k=>localStorage.removeItem(k));
+  } catch(e) {}
+}
+
+function loadDraft() {
+  try {
+    const form   = JSON.parse(localStorage.getItem(LS_DRAFT)||"null");
+    const wo     = JSON.parse(localStorage.getItem(LS_WO)||"null");
+    const drn    = localStorage.getItem(LS_DRN)||"";
+    const driver = localStorage.getItem(LS_DRIVER)||"";
+    const screen = localStorage.getItem(LS_SCREEN)||"driver";
+    return { form, wo, drn, driver, screen };
+  } catch(e) { return null; }
+}
+
 // ─── APP ─────────────────────────────────────────────────────
 export default function App() {
-  const [screen,setScreen]   = useState("driver");
-  const [driver,setDriver]   = useState(null);
+  // Restore from localStorage on startup (handles camera crash/reload)
+  const saved = loadDraft();
+  const [screen,setScreen]   = useState(saved?.screen==="form"&&saved?.wo ? "form" : saved?.screen==="jobs"&&saved?.driver ? "jobs" : "driver");
+  const [driver,setDriver]   = useState(saved?.driver||null);
   const [allWOs,setAllWOs]   = useState([]);
   const [loading,setLoading] = useState(false);
   const [lastSync,setLastSync]= useState(null);
   const [fetchError,setFetchError]= useState("");
-  const [currentWO,setWO]    = useState(null);
+  const [currentWO,setWO]    = useState(saved?.wo||null);
   const [completed,setDone]  = useState({});
-  const [drn,setDrn]         = useState("");
-  const [form,setForm]       = useState({...BLANK});
+  const [drn,setDrn]         = useState(saved?.drn||"");
+  const [form,setForm]       = useState(saved?.form ? {...BLANK,...saved.form} : {...BLANK});
   const [submitted,setSub]   = useState(null);
   const [toast,setToast]     = useState(null);
   const [posting,setPosting] = useState(false);
+
+  // Auto-save draft whenever form/screen/wo changes
+  useEffect(() => {
+    if (screen === "form" && currentWO) {
+      saveDraft(form, currentWO, drn, driver, screen);
+    } else if (screen === "jobs" && driver) {
+      saveDraft(form, currentWO, drn, driver, screen);
+    }
+  }, [form, screen, currentWO, drn, driver]);
+
+  // Show restore toast if we recovered a draft
+  useEffect(() => {
+    if (saved?.screen==="form" && saved?.wo) {
+      showToast("📋 Draft restored — carry on where you left off");
+    }
+  }, []);
 
   function f(key){ return val=>setForm(p=>({...p,[key]:val})); }
   function fi(key){ return e=>f(key)(e.target.value); }
@@ -459,6 +518,7 @@ export default function App() {
       setSub({...rec, form});
       setScreen("done");
       window.scrollTo(0,0);
+      clearDraft();
       showToast("✅ Submitted — sheet & email sent");
     } catch(e) {
       showToast("⚠ Saved locally — check connection",false);
@@ -480,7 +540,7 @@ export default function App() {
     </div>
 
     {/* ── DRIVER SELECT ── */}
-    {screen==="driver"&&<div style={S.screen}>
+    {screen==="driver"&&<div style={S.screen} ref={el=>{ if(el) clearDraft(); }}>
       <div style={{height:14}}/>
       <div style={S.title}>Who's driving?</div>
       <div style={S.sub}>Tap your name to see today's jobs</div>
