@@ -48,9 +48,21 @@ function todayStr() {
   return new Date().toLocaleDateString("en-CA",{weekday:"short",month:"short",day:"numeric",year:"numeric"});
 }
 function todaySheetStr() {
-  // Matches the format written by the Apps Script: yyyy-MM-dd
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+// Normalise any date format from Sheets to yyyy-MM-dd for comparison
+function normaliseDate(raw) {
+  if (!raw) return "";
+  // Handle ISO timestamp: 2026-05-07T07:00:00.000Z
+  if (String(raw).includes("T")) return String(raw).split("T")[0];
+  // Handle Date objects from Sheets
+  if (raw instanceof Date) {
+    const d = raw;
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  }
+  // Already yyyy-MM-dd
+  return String(raw).slice(0,10);
 }
 function calcHours(start, end) {
   if (!start||!end) return null;
@@ -394,7 +406,7 @@ export default function App() {
   const today = todaySheetStr();
   const myJobs = allWOs.filter(wo => {
     const woDriver  = wo["Driver"]  || wo.driver  || "";
-    const woDate    = wo["Date Created"] || wo.date || "";
+    const woDate    = normaliseDate(wo["Date Created"] || wo.date || "");
     const woStatus  = wo["Status"] || wo.status || "";
     return woDriver === driver &&
            woDate === today &&
