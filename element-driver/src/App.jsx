@@ -196,7 +196,7 @@ function PhotoCapture({ label, photos, onChange, maxPhotos=5 }) {
         <span style={{fontSize:22}}>📷</span><span>Add</span>
       </div>}
     </div>
-    <input ref={ref} type="file" accept="image/*" capture="environment" multiple style={{display:"none"}} onChange={handleFiles}/>
+    <input ref={ref} type="file" accept="image/*" multiple style={{display:"none"}} onChange={handleFiles}/>
   </Field>;
 }
 function PinCapture({ pin, onChange }) {
