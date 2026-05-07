@@ -84,9 +84,9 @@ function decimalHours(start, end) {
 function sanitizeForm(form) {
   return {
     ...form,
-    sitePhotos: form.sitePhotos.map(p=>({name:p.name})),
-    disposalTicketPhotos: form.disposalTicketPhotos.map(p=>({name:p.name})),
-    damagePhotos: form.damagePhotos.map(p=>({name:p.name})),
+    sitePhotos: (PHOTO_STORE["sitePhotos"]||[]).map((_,i)=>({name:`site-${i+1}.jpg`})),
+    disposalTicketPhotos: (PHOTO_STORE["disposalTicketPhotos"]||[]).map((_,i)=>({name:`ticket-${i+1}.jpg`})),
+    damagePhotos: (PHOTO_STORE["damagePhotos"]||[]).map((_,i)=>({name:`damage-${i+1}.jpg`})),
     equipmentDropPin: form.equipmentDropPin ? {
       lat:form.equipmentDropPin.lat,
       lng:form.equipmentDropPin.lng,
@@ -174,27 +174,58 @@ function YesNo({ label, value, onChange }) {
     </div>
   </Field>;
 }
-function PhotoCapture({ label, photos, onChange, maxPhotos=5 }) {
+// ─── PHOTO STORE (outside React state to avoid memory crashes) ───
+// Photos are stored in a plain JS Map keyed by slot name
+// React only tracks the count, not the actual image data
+const PHOTO_STORE = {};
+
+function PhotoCapture({ label, slotKey, count, onCountChange, maxPhotos=5 }) {
   const ref = useRef();
+  const [thumbs, setThumbs] = useState([]);
+
+  // Build thumbs from store on mount
+  useEffect(() => {
+    const stored = PHOTO_STORE[slotKey] || [];
+    setThumbs(stored.map(url => url));
+  }, [slotKey]);
+
   function handleFiles(e) {
-    Array.from(e.target.files).forEach(file=>{
-      const r=new FileReader();
-      r.onload=ev=>onChange(prev=>[...prev,{src:ev.target.result,name:file.name}]);
-      r.readAsDataURL(file);
-    });
-    e.target.value="";
+    const files = Array.from(e.target.files);
+    if (!files.length) return;
+    const existing = PHOTO_STORE[slotKey] || [];
+    const slots = maxPhotos - existing.length;
+    const toAdd = files.slice(0, slots);
+    const newUrls = toAdd.map(f => URL.createObjectURL(f));
+    const updated = [...existing, ...newUrls];
+    PHOTO_STORE[slotKey] = updated;
+    setThumbs(updated);
+    onCountChange(updated.length);
+    e.target.value = "";
   }
+
+  function remove(i) {
+    const stored = PHOTO_STORE[slotKey] || [];
+    URL.revokeObjectURL(stored[i]);
+    const updated = stored.filter((_,j) => j !== i);
+    PHOTO_STORE[slotKey] = updated;
+    setThumbs(updated);
+    onCountChange(updated.length);
+  }
+
   return <Field label={label}>
     <div style={S.photoGrid}>
-      {photos.map((ph,i)=>(
+      {thumbs.map((src,i)=>(
         <div key={i} style={S.photoThumb}>
-          <img src={ph.src} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
-          <button onClick={()=>onChange(photos.filter((_,j)=>j!==i))} style={{position:"absolute",top:3,right:3,width:20,height:20,borderRadius:"50%",background:"rgba(0,0,0,0.75)",color:"#fff",border:"none",fontSize:11,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+          <img src={src} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} loading="lazy"/>
+          <button onClick={()=>remove(i)} style={{position:"absolute",top:3,right:3,width:22,height:22,borderRadius:"50%",background:"rgba(0,0,0,0.8)",color:"#fff",border:"none",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>✕</button>
         </div>
       ))}
-      {photos.length<maxPhotos&&<div style={S.addPhotoBtn} onClick={()=>ref.current.click()}>
-        <span style={{fontSize:22}}>📷</span><span>Add</span>
-      </div>}
+      {thumbs.length < maxPhotos && (
+        <div style={S.addPhotoBtn} onClick={()=>ref.current.click()}>
+          <span style={{fontSize:22}}>📷</span>
+          <span>{thumbs.length > 0 ? `Add (${thumbs.length}/${maxPhotos})` : "Add"}</span>
+        </div>
+      )}
     </div>
     <input ref={ref} type="file" accept="image/*" multiple style={{display:"none"}} onChange={handleFiles}/>
   </Field>;
@@ -493,6 +524,11 @@ export default function App() {
     const equip = wo.equipment||wo["Equipment"]||"";
     const waste = wo.waste||wo["Waste Type"]||"";
     setForm({...BLANK, equipmentOut:equip, disposalWasteType:waste, disposalRate:"60"});
+    // Clear photo store for new job
+    ["sitePhotos","disposalTicketPhotos","damagePhotos"].forEach(k=>{
+      (PHOTO_STORE[k]||[]).forEach(url=>URL.revokeObjectURL(url));
+      delete PHOTO_STORE[k];
+    });
     setScreen("form");
     window.scrollTo(0,0);
   }
@@ -662,7 +698,7 @@ export default function App() {
           <Field label="Equipment # OUT" half><input value={form.equipmentOut} onChange={fi("equipmentOut")} placeholder="e.g. 30B-X" style={S.input}/></Field>
         </div>
         <PinCapture pin={form.equipmentDropPin} onChange={f("equipmentDropPin")}/>
-        <PhotoCapture label="Site / Bin Photos" photos={form.sitePhotos} onChange={f("sitePhotos")}/>
+        <PhotoCapture label="Site / Bin Photos" slotKey="sitePhotos" count={form.sitePhotos.length} onCountChange={n=>f("sitePhotos")(Array(n).fill({name:"photo"}))} />
         <TimeField label="Departure from site" value={form.departureFromSite} onChange={f("departureFromSite")}/>
       </div>
 
@@ -682,13 +718,13 @@ export default function App() {
           </Field>
           <Field label="Disposal rate ($/t)" half><input value={form.disposalRate} onChange={fi("disposalRate")} placeholder="$60" style={S.input}/></Field>
         </div>
-        <PhotoCapture label="🧾 Landfill Ticket Photo" photos={form.disposalTicketPhotos} onChange={f("disposalTicketPhotos")} maxPhotos={3}/>
+        <PhotoCapture label="🧾 Landfill Ticket Photo" slotKey="disposalTicketPhotos" count={form.disposalTicketPhotos.length} onCountChange={n=>f("disposalTicketPhotos")(Array(n).fill({name:"photo"}))} maxPhotos={3}/>
       </div>
 
       <SectionHead>5 — Equipment & Truck Condition</SectionHead>
       <div style={S.card}>
         <YesNo label="Damage to equipment?" value={form.damageToEquipment} onChange={f("damageToEquipment")}/>
-        {form.damageToEquipment==="Yes"&&<PhotoCapture label="📸 Damage Photos" photos={form.damagePhotos} onChange={f("damagePhotos")} maxPhotos={6}/>}
+        {form.damageToEquipment==="Yes"&&<PhotoCapture label="📸 Damage Photos" slotKey="damagePhotos" count={form.damagePhotos.length} onCountChange={n=>f("damagePhotos")(Array(n).fill({name:"photo"}))} maxPhotos={6}/>}
         <YesNo label="Equipment requiring cleaning?" value={form.equipNeedsCleaning} onChange={f("equipNeedsCleaning")}/>
         <YesNo label="Truck requiring cleaning?" value={form.truckNeedsCleaning} onChange={f("truckNeedsCleaning")}/>
         {form.truckNeedsCleaning==="Yes"&&<Field label="Cleaning time (mins)"><input type="number" value={form.cleaningTime} onChange={fi("cleaningTime")} placeholder="e.g. 30" style={S.input}/></Field>}
